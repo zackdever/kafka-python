@@ -158,7 +158,7 @@ class BrokerConnection(object):
         self._rbuffer.seek(0)
         self._rbuffer.truncate()
         if error is None:
-            error = Errors.ConnectionError()
+            error = Errors.ConnectionError(str(self))
         while self.in_flight_requests:
             ifr = self.in_flight_requests.popleft()
             ifr.future.failure(error)
@@ -170,9 +170,9 @@ class BrokerConnection(object):
         """
         future = Future()
         if not self.connected():
-            return future.failure(Errors.ConnectionError())
+            return future.failure(Errors.ConnectionError(str(self)))
         if not self.can_send_more():
-            return future.failure(Errors.TooManyInFlightRequests())
+            return future.failure(Errors.TooManyInFlightRequests(str(self)))
         correlation_id = self._next_correlation_id()
         header = RequestHeader(request,
                                correlation_id=correlation_id,
@@ -191,7 +191,7 @@ class BrokerConnection(object):
             self._sock.setblocking(False)
         except (AssertionError, ConnectionError) as e:
             log.exception("Error sending %s to %s", request, self)
-            error = Errors.ConnectionError(e)
+            error = Errors.ConnectionError("%s: %s" % (str(self), e))
             self.close(error=error)
             return future.failure(error)
         log.debug('%s Request %d: %s', self, correlation_id, request)
@@ -324,11 +324,9 @@ class BrokerConnection(object):
                         ' initialized on the broker')
 
         elif ifr.correlation_id != recv_correlation_id:
-
-
             error = Errors.CorrelationIdError(
-                'Correlation ids do not match: sent %d, recv %d'
-                % (ifr.correlation_id, recv_correlation_id))
+                '%s: Correlation ids do not match: sent %d, recv %d'
+                % (str(self), ifr.correlation_id, recv_correlation_id))
             ifr.future.failure(error)
             self.close()
             self._processing = False

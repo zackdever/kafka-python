@@ -169,9 +169,11 @@ class BrokerConnection(object):
         Can block on network if request is larger than send_buffer_bytes
         """
         future = Future()
-        if not self.connected():
+        if self.connecting():
+            return future.failure(Errors.NodeNotReadyError(str(self)))
+        elif not self.connected():
             return future.failure(Errors.ConnectionError(str(self)))
-        if not self.can_send_more():
+        elif not self.can_send_more():
             return future.failure(Errors.TooManyInFlightRequests(str(self)))
         correlation_id = self._next_correlation_id()
         header = RequestHeader(request,

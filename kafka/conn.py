@@ -104,23 +104,22 @@ class BrokerConnection(object):
             # in non-blocking mode, use repeated calls to socket.connect_ex
             # to check connection status
             request_timeout = self.config['request_timeout_ms'] / 1000.0
-            if time.time() > request_timeout + self.last_attempt:
+            try:
+                ret = self._sock.connect_ex((self.host, self.port))
+            except socket.error as ret:
+                pass
+            if not ret or ret is errno.EISCONN:
+                self.state = ConnectionStates.CONNECTED
+            elif ret is not errno.EALREADY:
+                log.error('Connect attempt to %s returned error %s.'
+                          ' Disconnecting.', self, ret)
+                self.close()
+                self.last_failure = time.time()
+            elif time.time() > request_timeout + self.last_attempt:
                 log.error('Connection attempt to %s timed out', self)
                 self.close() # error=TimeoutError ?
                 self.last_failure = time.time()
 
-            else:
-                try:
-                    ret = self._sock.connect_ex((self.host, self.port))
-                except socket.error as ret:
-                    pass
-                if not ret or ret is errno.EISCONN:
-                    self.state = ConnectionStates.CONNECTED
-                elif ret is not errno.EALREADY:
-                    log.error('Connect attempt to %s returned error %s.'
-                              ' Disconnecting.', self, ret)
-                    self.close()
-                    self.last_failure = time.time()
         return self.state
 
     def blacked_out(self):

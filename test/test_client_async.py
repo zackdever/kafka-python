@@ -224,12 +224,9 @@ def test_is_disconnected(conn):
 
 def test_send(conn):
     cli = KafkaClient()
-    try:
-        cli.send(2, None)
-    except Errors.NodeNotReadyError:
-        pass
-    else:
-        assert False, 'NodeNotReadyError not raised'
+    f = cli.send(2, None)
+    assert f.failed()
+    assert isinstance(f.exception, Errors.NodeNotReadyError)
 
     cli._initiate_connect(0)
     # ProduceRequest w/ 0 required_acks -> no response

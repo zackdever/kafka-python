@@ -291,16 +291,11 @@ class KafkaClient(object):
             node_id (int): destination node
             request (Struct): request object (not-encoded)
 
-        Raises:
-            NodeNotReadyError: if node_id is not ready
-
         Returns:
-            Future: resolves to Response struct
+            Future: resolves to Response struct or Error
         """
         if not self._can_send_request(node_id):
-            raise Errors.NodeNotReadyError("Attempt to send a request to node"
-                                           " which is not ready (node id %s)."
-                                           % node_id)
+            return Future().failure(Errors.NodeNotReadyError(node_id))
 
         # Every request gets a response, except one special case:
         expect_response = True

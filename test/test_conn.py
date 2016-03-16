@@ -49,7 +49,7 @@ def test_connect_timeout(socket, conn):
     # immediate inline connect returns EALREADY
     # second explicit connect returns EALREADY
     # third explicit connect returns EALREADY and times out via last_attempt
-    socket.connect_ex.side_effect = [36, 37, 37, 37]
+    socket.connect_ex.side_effect = [EINPROGRESS, EALREADY, EALREADY, EALREADY]
     conn.connect()
     assert conn.state is ConnectionStates.CONNECTING
     conn.connect()

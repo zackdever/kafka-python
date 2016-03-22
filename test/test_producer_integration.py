@@ -16,7 +16,7 @@ from kafka.common import (
 )
 from kafka.producer.base import Producer
 
-from test.fixtures import ZookeeperFixture, KafkaFixture
+from test.fixtures import ZookeeperFixture, KafkaFixture, FixtureManager
 from test.testutil import KafkaIntegrationTestCase, kafka_versions
 
 
@@ -29,6 +29,7 @@ class TestKafkaProducerIntegration(KafkaIntegrationTestCase):
 
         cls.zk = ZookeeperFixture.instance()
         cls.server = KafkaFixture.instance(0, cls.zk.host, cls.zk.port)
+        FixtureManager.open_instances(cls.server)
 
     @classmethod
     def tearDownClass(cls):  # noqa

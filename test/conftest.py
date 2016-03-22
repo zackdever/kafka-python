@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from test.fixtures import KafkaFixture, ZookeeperFixture
+from test.fixtures import KafkaFixture, ZookeeperFixture, FixtureManager
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +27,8 @@ def kafka_broker(version, zookeeper, request):
     assert version
     k = KafkaFixture.instance(0, zookeeper.host, zookeeper.port,
                               partitions=4)
+    # TODO maybe pass delay option to instance that defaults to False
+    FixtureManager.open_instances(k)
     def fin():
         k.close()
     request.addfinalizer(fin)

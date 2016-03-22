@@ -13,7 +13,7 @@ from kafka.common import (
 )
 from kafka.consumer.base import MAX_FETCH_BUFFER_SIZE_BYTES
 
-from test.fixtures import ZookeeperFixture, KafkaFixture
+from test.fixtures import ZookeeperFixture, KafkaFixture, FixtureManager
 from test.testutil import (
     KafkaIntegrationTestCase, kafka_versions, random_string, Timer
 )
@@ -31,6 +31,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
                                             zk_chroot=chroot)
         cls.server2 = KafkaFixture.instance(1, cls.zk.host, cls.zk.port,
                                             zk_chroot=chroot)
+        FixtureManager.open_instances(cls.server1, cls.server2)
 
         cls.server = cls.server1 # Bootstrapping server
 
@@ -39,8 +40,10 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         if not os.environ.get('KAFKA_VERSION'):
             return
 
-        cls.server1.close()
-        cls.server2.close()
+        cls.server1.close(cleanup=False)
+        cls.server2.close(cleanup=False)
+        cls.server1.cleanup()
+        cls.server2.cleanup()
         cls.zk.close()
 
     def send_messages(self, partition, messages):

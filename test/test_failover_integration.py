@@ -8,7 +8,7 @@ from kafka.common import (
 )
 from kafka.producer.base import Producer
 
-from test.fixtures import ZookeeperFixture, KafkaFixture
+from test.fixtures import ZookeeperFixture, KafkaFixture, FixtureManager
 from test.testutil import KafkaIntegrationTestCase, random_string
 
 
@@ -33,6 +33,7 @@ class TestFailover(KafkaIntegrationTestCase):
                      'partitions': partitions}
         self.brokers = [KafkaFixture.instance(i, *kk_args, **kk_kwargs)
                         for i in range(replicas)]
+        FixtureManager.open_instances(*self.brokers)
 
         hosts = ['%s:%d' % (b.host, b.port) for b in self.brokers]
         self.client = SimpleClient(hosts, timeout=2)
@@ -45,7 +46,9 @@ class TestFailover(KafkaIntegrationTestCase):
 
         self.client.close()
         for broker in self.brokers:
-            broker.close()
+            broker.close(cleanup=False)
+        for broker in self.brokers:
+            broker.cleanup()
         self.zk.close()
 
     def test_switch_leader(self):

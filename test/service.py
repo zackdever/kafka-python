@@ -110,6 +110,13 @@ class SpawnedService(threading.Thread):
                 return True
             time.sleep(0.1)
 
+    def output_contains(self, pattern):
+        if re.search(pattern, '\n'.join(self.captured_stdout), re.IGNORECASE) is not None:
+            return True
+        elif re.search(pattern, '\n'.join(self.captured_stderr), re.IGNORECASE) is not None:
+            return True
+        return False
+
     def stop(self):
         self.should_die.set()
         self.join()

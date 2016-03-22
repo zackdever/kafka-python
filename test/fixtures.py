@@ -72,9 +72,10 @@ class Fixture(object):
         result.extend(args)
         return result
 
-    def kafka_run_class_env(self):
+    @classmethod
+    def kafka_run_class_env(cls):
         env = os.environ.copy()
-        env['KAFKA_LOG4J_OPTS'] = "-Dlog4j.configuration=file:%s" % self.test_resource("log4j.properties")
+        env['KAFKA_LOG4J_OPTS'] = "-Dlog4j.configuration=file:%s" % cls.test_resource("log4j.properties")
         return env
 
     @classmethod
@@ -180,7 +181,49 @@ class ZookeeperFixture(Fixture):
         self.close()
 
 
+class FixtureManager(object):
+    @classmethod
+    def open_instances(cls, *instances):
+        # going to try just kafka instances for now. TODO add zk
+        max_timeout = 30
+        backoff = 1
+        timeout = 5
+        tries = 1
+        end_at = time.time() + max_timeout
+        to_start = set(instances)
+        for instance in instances:
+            instance.open() # TODO bad name, just a carry over
+        while time.time() < end_at:
+            for instance in to_start:
+                instance.out('Attempting to start (try #%d)' % tries)
+                instance.start_child()
+            retry_at = time.time() + timeout
+            while time.time() < retry_at:
+                if not to_start:
+                    # TODO log something about being all done
+                    return
+                to_remove = []
+                for instance in to_start:
+                    if instance.is_started():
+                        instance.mark_running()
+                        to_remove.append(instance)
+                for instance in to_remove:
+                    to_start.remove(instance)
+                time.sleep(0.1)
+            for instance in to_start:
+                instance.stop_child()
+            timeout *= 2
+            time.sleep(backoff)
+            tries += 1
+            retry_at = time.time() + timeout
+        else:
+            # TODO better logging. which instance(s) failed?
+            raise Exception('Failed to start KafkaInstance before max_timeout')
+
+
 class KafkaFixture(Fixture):
+    # TODO instance should likely be __init__ at this point. look at setting
+    # temp_dir and everything else.
     @classmethod
     def instance(cls, broker_id, zk_host, zk_port,
                  zk_chroot=None, port=None, replicas=1, partitions=2):
@@ -196,7 +239,6 @@ class KafkaFixture(Fixture):
             host = "127.0.0.1"
             fixture = KafkaFixture(host, port, broker_id, zk_host, zk_port, zk_chroot,
                                    replicas=replicas, partitions=partitions)
-            fixture.open()
         return fixture
 
     def __init__(self, host, port, broker_id, zk_host, zk_port, zk_chroot, replicas=1, partitions=2):
@@ -213,6 +255,7 @@ class KafkaFixture(Fixture):
         self.partitions = partitions
 
         self.tmp_dir = None
+        self.properties = None
         self.child = None
         self.running = False
 
@@ -245,71 +288,81 @@ class KafkaFixture(Fixture):
         os.mkdir(os.path.join(self.tmp_dir, "logs"))
         os.mkdir(os.path.join(self.tmp_dir, "data"))
 
-        # Generate configs
-        template = self.test_resource("kafka.properties")
-        properties = os.path.join(self.tmp_dir, "kafka.properties")
-        self.render_template(template, properties, vars(self))
+        self.generate_configs()
 
         # Party!
         self.out("Creating Zookeeper chroot node...")
         args = self.kafka_run_class_args("org.apache.zookeeper.ZooKeeperMain",
-                                         "-server", "%s:%d" % (self.zk_host, self.zk_port),
-                                         "create",
-                                         "/%s" % self.zk_chroot,
-                                         "kafka-python")
+                                        "-server", "%s:%d" % (self.zk_host, self.zk_port),
+                                        "create",
+                                        "/%s" % self.zk_chroot,
+                                        "kafka-python")
         env = self.kafka_run_class_env()
         proc = subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        if proc.wait() != 0:
+        if proc.wait() != 0: # TODO proc.poll()
             self.out("Failed to create Zookeeper chroot node")
             self.out(proc.stdout.read())
             self.out(proc.stderr.read())
             raise RuntimeError("Failed to create Zookeeper chroot node")
         self.out("Done!")
 
+    def start_child(self):
         # Configure Kafka child process
-        args = self.kafka_run_class_args("kafka.Kafka", properties)
+        args = self.kafka_run_class_args("kafka.Kafka", self.properties)
         env = self.kafka_run_class_env()
 
-        timeout = 5
-        max_timeout = 30
-        backoff = 1
-        end_at = time.time() + max_timeout
-        tries = 1
-        while time.time() < end_at:
-            self.out('Attempting to start (try #%d)' % tries)
-            try:
-                os.stat(properties)
-            except:
-                log.warning('Config %s not found -- re-rendering', properties)
-                self.render_template(template, properties, vars(self))
-            self.child = SpawnedService(args, env)
-            self.child.start()
-            timeout = min(timeout, max(end_at - time.time(), 0))
-            if self.child.wait_for(r"\[Kafka Server %d\], Started" %
-                                   self.broker_id, timeout=timeout):
-                break
-            self.child.stop()
-            timeout *= 2
-            time.sleep(backoff)
-            tries += 1
-        else:
-            raise Exception('Failed to start KafkaInstance before max_timeout')
+        self.ensure_configs()
+        self.child = SpawnedService(args, env)
+        self.child.start()
+
+    def stop_child(self):
+        self.child.stop()
+
+    def is_started(self):
+        return self.child.output_contains(r"\[Kafka Server %d\], Started" %
+                                          self.broker_id)
+
+    def mark_running(self):
         self.out("Done!")
         self.running = True
         atexit.register(self.close)
 
+    def generate_configs(self):
+        self.ensure_configs(_force=True)
+
+    def ensure_configs(self, _force=False):
+        template = self.test_resource("kafka.properties")
+        self.properties = os.path.join(self.tmp_dir, "kafka.properties")
+        if _force:
+            self.render_template(template, self.properties, vars(self))
+        else:
+            try:
+                os.stat(self.properties)
+            except:
+                log.warning('Config %s not found -- re-rendering', self.properties)
+                self.render_template(template, self.properties, vars(self))
+
+
     def __del__(self):
         self.close()
 
-    def close(self):
+    def close(self, cleanup=True):
         if not self.running:
             self.out("Instance already stopped")
             return
 
         self.out("Stopping...")
-        self.child.stop()
-        self.child = None
-        self.out("Done!")
-        shutil.rmtree(self.tmp_dir)
-        self.running = False
+        self.child.should_die.set()
+        if cleanup:
+            self.cleanup()
+
+
+    def cleanup(self):
+        if self.child is not None:
+            self.child.join()
+            self.child = None
+        if self.running:
+            self.out("Done!")
+            shutil.rmtree(self.tmp_dir)
+            self.running = False

@@ -6,7 +6,7 @@ from kafka.common import (
 )
 from kafka.protocol import create_message
 
-from test.fixtures import ZookeeperFixture, KafkaFixture
+from test.fixtures import ZookeeperFixture, KafkaFixture, FixtureManager
 from test.testutil import KafkaIntegrationTestCase, kafka_versions
 
 
@@ -18,6 +18,7 @@ class TestKafkaClientIntegration(KafkaIntegrationTestCase):
 
         cls.zk = ZookeeperFixture.instance()
         cls.server = KafkaFixture.instance(0, cls.zk.host, cls.zk.port)
+        FixtureManager.open_instances(cls.server)
 
     @classmethod
     def tearDownClass(cls):  # noqa
